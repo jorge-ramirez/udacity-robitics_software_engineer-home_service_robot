@@ -2,7 +2,6 @@
 #include <visualization_msgs/Marker.h>
 #include <nav_msgs/Odometry.h>
 #include <cmath>
-#include <rclcpp/rclcpp.hpp>
 
 // Define a type to hold a coordinate
 class Coordinate {
