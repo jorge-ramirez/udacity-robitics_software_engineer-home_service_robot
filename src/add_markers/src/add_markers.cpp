@@ -1,6 +1,7 @@
 #include <ros/ros.h>
 #include <visualization_msgs/Marker.h>
 #include <nav_msgs/Odometry.h>
+#include <std_msgs/Int32.h>
 #include <cmath>
 
 // Define a type to hold a coordinate
@@ -13,21 +14,21 @@ public:
     this->x = x;
     this->y = y;
   }
-
-  double distanceTo(Coordinate coord) {
-    return sqrt(pow(this->x - coord.x, 2) + pow(this->y - coord.y, 2));
-  }
 };
 
-// Define the robots coordinates to move to
-Coordinate targetCoordinates[2] = {
-  Coordinate(-2.0, 4.5),
-  Coordinate(5.0, 2.5)
+enum RobotState {
+  FINDING_PICKUP,
+  PICKING_UP,
+  FINDING_DROPOFF,
+  DROPPING_OFF
 };
 
-Coordinate odometryCoordinate = Coordinate(0.0, 0.0);
+RobotState currentState = FINDING_PICKUP;
 
-visualization_msgs::Marker createMarker(uint32_t shape, Coordinate coordinate) {
+Coordinate pickupCoordinate = Coordinate(-2.0, 4.5);
+Coordinate dropoffCoordinate = Coordinate(5.0, 2.5);
+
+visualization_msgs::Marker createMarker(uint32_t shape) {
   visualization_msgs::Marker marker;
   
   marker.header.frame_id = "map";
@@ -36,8 +37,8 @@ visualization_msgs::Marker createMarker(uint32_t shape, Coordinate coordinate) {
   marker.id = 0;
   marker.type = shape;
 
-  marker.pose.position.x = coordinate.x;
-  marker.pose.position.y = coordinate.y;
+  marker.pose.position.x = 0.0;
+  marker.pose.position.y = 0.0;
   marker.pose.position.z = 1.0;
   marker.pose.orientation.x = 0.0;
   marker.pose.orientation.y = 0.0;
@@ -59,57 +60,57 @@ visualization_msgs::Marker createMarker(uint32_t shape, Coordinate coordinate) {
   return marker;
 }
 
-void odometryCallback(const nav_msgs::Odometry::ConstPtr& msg)
-{
-  odometryCoordinate = Coordinate(msg->pose.pose.position.x, msg->pose.pose.position.y);
-  //ROS_INFO("received odometry: {x: %0.4lf, y: %0.4lf}", msg->pose.pose.position.x, msg->pose.pose.position.y);
+void state_callback(const std_msgs::Int32::ConstPtr& msg){
+  currentState = (RobotState) msg->data;
 }
 
 int main(int argc, char** argv){
   ros::init(argc, argv, "add_markers");
   
-  double tolerance = 0.5;
-  bool hasFoundFirstItem = false;
   ros::NodeHandle n;
   ros::Rate r(1.0);
   ros::Publisher markerPub = n.advertise<visualization_msgs::Marker>("visualization_marker", 1);
-  ros::Subscriber odometrySub = n.subscribe("/odom", 1000, odometryCallback);
+  ros::Subscriber stateSub = n.subscribe("home_service_robot_state", 1, state_callback);
   
   // create the marker
-  visualization_msgs::Marker marker = createMarker(visualization_msgs::Marker::CUBE, targetCoordinates[0]);
+  visualization_msgs::Marker marker = createMarker(visualization_msgs::Marker::CUBE);
   
-  while(ros::ok()) {
-    if (!hasFoundFirstItem) {
-      // show the first item marker
-      markerPub.publish(marker);
+  while (ros::ok()) {
+    // wait for subscribers
+    while (markerPub.getNumSubscribers() < 1) {
+      if (!ros::ok()) {
+        return 0;
+      }
       
-      ROS_INFO("distance from: {x: %0.4lf, y: %0.4lf} to {x: %0.4lf, y: %0.4lf} = %0.4lf", odometryCoordinate.x, odometryCoordinate.y, targetCoordinates[0].x, targetCoordinates[0].y, odometryCoordinate.distanceTo(targetCoordinates[0]));
-      if (odometryCoordinate.distanceTo(targetCoordinates[0]) < tolerance) {
-        hasFoundFirstItem = true;
-        
-        // hide the first item marker when it is found
-        marker.action = visualization_msgs::Marker::DELETE;
-        markerPub.publish(marker);
-        
-        //ros::spinOnce();
-        //ros::Duration(5.0).sleep(); // "pickup" object
-      }
-    } else {
-      // show the second item marker when it is found
-      marker.action = visualization_msgs::Marker::ADD;
-      marker.pose.position.x = targetCoordinates[1].x;
-      marker.pose.position.y = targetCoordinates[1].y;
-      markerPub.publish(marker);
-    
-      if (odometryCoordinate.distanceTo(targetCoordinates[1]) < tolerance) {
-        // hide the second item marker when it is found
-        marker.action = visualization_msgs::Marker::DELETE;
-        markerPub.publish(marker);
-      }
+      ROS_WARN_ONCE("Waiting for marker subscribers");
+      sleep(1);
     }
     
+    switch (currentState) {
+      case FINDING_PICKUP:
+        // show the pickup location marker
+        marker.pose.position.x = pickupCoordinate.x;
+        marker.pose.position.y = pickupCoordinate.y;
+        marker.action = visualization_msgs::Marker::ADD;
+        break;
+      case PICKING_UP:
+        // hide the pickup location marker
+        marker.action = visualization_msgs::Marker::DELETE;
+        break;
+      case FINDING_DROPOFF:
+        // show the dropoff location marker
+        marker.pose.position.x = dropoffCoordinate.x;
+        marker.pose.position.y = dropoffCoordinate.y;
+        marker.action = visualization_msgs::Marker::ADD;
+        break;
+      case DROPPING_OFF:
+        // hide the dropoff location marker
+        marker.action = visualization_msgs::Marker::DELETE;
+        break;
+    }
+    
+    markerPub.publish(marker);
     ros::spinOnce();
-    r.sleep();
   }
 
   return 0;

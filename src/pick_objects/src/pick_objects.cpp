@@ -2,7 +2,8 @@
 #include <move_base_msgs/MoveBaseAction.h>
 #include <actionlib/client/simple_action_client.h>
 #include <cmath>
- 
+#include <std_msgs/Int32.h>
+
 // Define a client for to send goal requests to the move_base server through a SimpleActionClient
 typedef actionlib::SimpleActionClient<move_base_msgs::MoveBaseAction> MoveBaseClient;
 
@@ -16,18 +17,19 @@ public:
     this->x = x;
     this->y = y;
   }
-
-  double distanceTo(Coordinate coord) {
-    return sqrt(pow(this->x - coord.x, 2) + pow(this->y - coord.y, 2));
-  }
 };
 
 // Define the robots coordinates to move to
-Coordinate targetCoordinates[2] = {
-  Coordinate(-2.0, 4.5),
-  Coordinate(5.0, 2.5)
+Coordinate pickupCoordinate = Coordinate(-2.0, 4.5);
+Coordinate dropoffCoordinate = Coordinate(5.0, 2.5);
+
+// Define a type to advertise the robot state
+enum RobotState {
+  FINDING_PICKUP,
+  PICKING_UP,
+  FINDING_DROPOFF,
+  DROPPING_OFF
 };
-int numberOfCoordinates = 2;
 
 move_base_msgs::MoveBaseGoal createTargetGoal(Coordinate coordinate) {
   move_base_msgs::MoveBaseGoal goal;
@@ -65,9 +67,19 @@ bool moveToTarget(MoveBaseClient &ac, Coordinate coordinate) {
   return sendTargetGoal(ac, goal);
 }
 
-int main(int argc, char** argv){
+void updateState(RobotState newState, ros::Publisher &statePub) {
+  std_msgs::Int32 stateMessage;
+  stateMessage.data = newState;
+  statePub.publish(stateMessage);
+}
+
+int main(int argc, char** argv) {
   // Initialize the pick_objects node
   ros::init(argc, argv, "pick_objects");
+  ros::NodeHandle n;
+  
+  // Define the state publisher
+  ros::Publisher statePub = n.advertise<std_msgs::Int32>("home_service_robot_state", 0);
 
   // tell the action client that we want to spin a thread by default
   MoveBaseClient ac("move_base", true);
@@ -77,19 +89,30 @@ int main(int argc, char** argv){
     ROS_INFO("Waiting for the move_base action server to come up");
   }
 
-  for(int i = 0; i < numberOfCoordinates; i++) {
-    Coordinate coordinate = targetCoordinates[i];
-    ROS_INFO("Moving to position: {x: %0.4lf, y: %0.4lf}", coordinate.x, coordinate.y);
-    
-    if (moveToTarget(ac, coordinate)) {
-      ROS_INFO("Successfully moved to position: {x: %0.4lf, y: %0.4lf}", coordinate.x, coordinate.y);
-      ros::spinOnce();
-      ros::Duration(5.0).sleep(); // "pickup" object
-    } else {
-      ROS_INFO("Failed to move to position: {x: %0.4lf, y: %0.4lf}", coordinate.x, coordinate.y);
-      break;
-    }
+  ROS_INFO("Moving to pickupCoordinate: {x: %0.4lf, y: %0.4lf}", pickupCoordinate.x, pickupCoordinate.y);
+  updateState(FINDING_PICKUP, statePub);
+  if (moveToTarget(ac, pickupCoordinate)) {
+    ROS_INFO("Successfully moved to pickupCoordinate");
+  } else {
+    ROS_INFO("Failed to move to pickupCoordinate");
+    return 0;
   }
+  
+  ROS_INFO("Picking up Item");
+  updateState(PICKING_UP, statePub);
+  ros::spinOnce();
+  ros::Duration(5.0).sleep();
+
+  ROS_INFO("Moving to dropOffCoordinate: {x: %0.4lf, y: %0.4lf}", dropoffCoordinate.x, dropoffCoordinate.y);
+  updateState(FINDING_DROPOFF, statePub);
+  if (moveToTarget(ac, dropoffCoordinate)) {
+    ROS_INFO("Successfully moved to dropOffCoordinate");
+  } else {
+    ROS_INFO("Failed to move to dropOffCoordinate");
+    return 0;
+  }
+  
+  updateState(DROPPING_OFF, statePub);
 
   return 0;
 }
