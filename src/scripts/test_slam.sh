@@ -19,4 +19,3 @@ sleep 5
 
 echo "Executing keyboard_teleop launch file"
 xterm -e "roslaunch turtlebot_teleop keyboard_teleop.launch" &
-
