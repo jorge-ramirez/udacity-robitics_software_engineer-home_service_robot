@@ -16,7 +16,6 @@ The packages used in this project include:
 ### Build
 
 ```bash
-$ cd catkin_ws
 $ catkin_make
 $ source develop/setup.bash
 ```
